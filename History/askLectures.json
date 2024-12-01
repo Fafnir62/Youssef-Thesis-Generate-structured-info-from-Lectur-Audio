@@ -1,0 +1,22 @@
+[
+  {
+    "question": "What is Ros",
+    "answer": "I'm sorry, but based on the context provided, there is no mention of \"Ros\" or any relevant information that could help identify what it might be."
+  },
+  {
+    "question": "How to learn robotics",
+    "answer": "I don't have information on learning robotics based on the context provided."
+  },
+  {
+    "question": "what does the video talk about",
+    "answer": "The video is a lecture about database management systems. The instructor discusses course logistics, including the syllabus, waitlist, and late days policy. He emphasizes the importance of not plagiarizing on assignments and projects. Additionally, he mentions a seminar series on database systems and invites students to attend. The lecture also covers the basics of databases, such as different database systems like MySQL, Postgres, and Neo4j, and explains the importance of understanding database software in various career paths."
+  },
+  {
+    "question": "What is Ros",
+    "answer": "I'm sorry, but based on the context provided, there is no mention of \"Ros\" or any relevant information that could help identify what it might be."
+  },
+  {
+    "question": " What is Ros",
+    "answer": "Ros stands for the Robot Operating System. It is a middleware that acts as a communication layer between the actual operating system and the programs that you write for robotics. It provides tools, libraries, and conventions to help you build robot applications. Ros is widely used in the robotics community and is known for its flexibility, open-source nature, and extensive ecosystem of packages and resources."
+  }
+]
