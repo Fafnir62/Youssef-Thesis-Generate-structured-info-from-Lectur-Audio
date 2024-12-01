@@ -6,6 +6,7 @@ from langchain_community.embeddings import OpenAIEmbeddings
 from langchain_community.chat_models import ChatOpenAI
 from langchain.memory import ConversationBufferMemory
 from langchain.chains import ConversationalRetrievalChain
+import requests
 
 VECTORSTORE_PATH = "/home/fafnir/Alpha/_Python/Python Current/Youssef Thesis/vectorstore.faiss"
 EXPORT_PATH = "/home/fafnir/Alpha/_Python/Python Current/Youssef Thesis/Export Station"
@@ -85,6 +86,56 @@ def get_conversation_chain():
     )
 
 
+def fetch_additional_info(answer):
+    """
+    Fetch more information about the provided answer from the internet using SERP API.
+    """
+    SERP_API_KEY = os.getenv("SERP_API_KEY")
+    SERP_API_URL = "https://serpapi.com/search"
+
+    if not SERP_API_KEY:
+        return "SERP API key not set. Please configure it in the environment variables."
+
+    params = {
+        "q": answer,
+        "api_key": SERP_API_KEY,
+        "engine": "google"
+    }
+
+    try:
+        response = requests.get(SERP_API_URL, params=params)
+        response.raise_for_status()
+        search_results = response.json()
+
+        additional_info = []
+        for result in search_results.get("organic_results", []):
+            additional_info.append({
+                "title": result.get("title", "No title"),
+                "link": result.get("link", "No link"),
+                "snippet": result.get("snippet", "No description")
+            })
+
+        return additional_info
+    except Exception as e:
+        return f"Error fetching additional info: {e}"
+
+
+def display_additional_info(info):
+    """
+    Display additional information fetched from the internet.
+    """
+    if isinstance(info, str):  # Error message or no results
+        st.error(info)
+    elif info:
+        st.markdown("### More Information from Internet")
+        for item in info:
+            st.markdown(f"**[{item['title']}]({item['link']})**")
+            st.markdown(f"{item['snippet']}")
+            st.markdown("---")
+    else:
+        st.write("No additional information found.")
+
+
 def app():
     """
     Streamlit app to chat with the course and save the history.
@@ -112,6 +163,12 @@ def app():
 
             # Save the interaction to history
             save_to_history(user_question, answer)
+
+            # Add the "More Info from Internet" button only if the answer exists
+            if answer:
+                if st.button(f"More Info for: {user_question}", key=f"more_info_{user_question}"):
+                    additional_info = fetch_additional_info(answer)
+                    display_additional_info(additional_info)
         except Exception as e:
             st.error(f"Error generating answer: {e}")
 
