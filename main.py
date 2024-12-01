@@ -79,9 +79,9 @@ def structured_info_page():
             st.success("Structured information generated successfully!")
             for idx, section in enumerate(structured_data):
                 st.markdown(f"### {section['title']}")
-                st.markdown(f"**Summary:** {section['summary']}")
+                st.markdown(f"{section['summary']}")
                 if "key_points" in section:
-                    st.markdown("**Key Points:**")
+                    st.markdown("## **Key Points:**")
                     st.markdown(f"{section['key_points']}")
         else:
             st.error("Failed to generate structured information. Ensure a transcript is available.")
