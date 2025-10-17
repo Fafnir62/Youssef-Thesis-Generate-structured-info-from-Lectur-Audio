@@ -1,11 +1,14 @@
 import streamlit as st
 from streamlit_option_menu import option_menu
+import os
+import shutil
+
 from generateTranscript import transcribe_audio
 from structuredInfo import process_transcript
 from relatedArticles import get_related_articles
 from chatCourse import app as chat_course_app
-import os
-import shutil
+from structuredInfoOff import process_transcript_offline
+from chatCourseOff import app as chat_course_off_app
 
 EXPORT_PATH = "/home/fafnir/Alpha/_Python/Python Current/Youssef Thesis/Export Station"
 
@@ -42,6 +45,8 @@ class MultiApp:
                 app["function"]()
 
 
+# === Online Tabs ===
+
 def transcript_page():
     st.title("🎤 Transcribe MP3 Lecture")
     st.info("Upload an MP3 file and generate its transcript.")
@@ -70,7 +75,7 @@ def transcript_page():
 
 
 def structured_info_page():
-    st.title("Generate Structured Information")
+    st.title("🗂️ Structured Information")
     st.info("Organize lecture transcript into structured sections with titles, summaries, and key points.")
 
     if st.button("Generate Structured Information"):
@@ -88,7 +93,7 @@ def structured_info_page():
 
 
 def related_articles_page():
-    st.title("Related Articles")
+    st.title("🔗 Related Articles")
     st.info("Find articles related to the topics discussed in the transcript.")
 
     if st.button("Find Related Articles"):
@@ -103,18 +108,48 @@ def related_articles_page():
 
 
 def chat_course_page():
-    st.title("Chat with Course")
+    st.title("💬 Chat with Course")
     st.info("Chat with the transcript and get answers to your questions. Explore detailed explanations.")
 
-    # The chatCourse.py app function handles the functionality
     chat_course_app()
 
+
+# === Offline Tabs ===
+
+def structured_info_offline_page():
+    st.title("🗂️ Offline Structured Information")
+    st.info("Organize the lecture transcript into structured sections completely offline.")
+
+    if st.button("Generate Offline Structured Information"):
+        structured_data = process_transcript_offline()
+        if structured_data:
+            st.success("Offline structured information generated successfully!")
+            for idx, section in enumerate(structured_data):
+                st.markdown(f"### {section['title']}")
+                st.markdown(f"{section['summary']}")
+                if "key_points" in section:
+                    st.markdown("## **Key Points:**")
+                    st.markdown(f"{section['key_points']}")
+        else:
+            st.error("Failed to generate offline structured information. Ensure a transcript is available.")
+
+
+def chat_course_offline_page():
+    st.title("💬 Offline Chat with Course")
+    st.info("Chat with the transcript completely offline, using local models with no internet required.")
+
+    chat_course_off_app()
+
+
+# === App Runner ===
 
 if __name__ == "__main__":
     st.info("Initializing the application... Please wait.")
     app = MultiApp()
     app.add_app("🎤 Transcribe Lecture", transcript_page, "microphone")
-    app.add_app("tructured Information", structured_info_page, "file-text")
+    app.add_app("Structured Information", structured_info_page, "file-text")
     app.add_app("Related Articles", related_articles_page, "link")
     app.add_app("Chat with Course", chat_course_page, "chat")
+    app.add_app("Offline Structured Info", structured_info_offline_page, "file-text")
+    app.add_app("Offline Chat", chat_course_offline_page, "chat")
     app.run()

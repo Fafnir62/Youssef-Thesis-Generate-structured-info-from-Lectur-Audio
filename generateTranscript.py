@@ -5,15 +5,7 @@ import whisper
 EXPORT_PATH = "/home/fafnir/Alpha/_Python/Python Current/Youssef Thesis/Export Station"
 
 def transcribe_audio(file_path):
-    """
-    Transcribe an MP3 audio file into text using Whisper.
 
-    Args:
-        file_path (str): Path to the MP3 file to be transcribed.
-
-    Returns:
-        tuple: Path to the saved transcript and the transcript text, or (None, None) if an error occurs.
-    """
     try:
         # Check if the Whisper library is properly installed
         if not hasattr(whisper, "load_model"):

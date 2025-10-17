@@ -2,3 +2,7 @@
 Projeect concept.txt
 .venv/
 .git/lfs/
+.env
+.venv/
+__pycache__/
+*.pyc

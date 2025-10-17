@@ -19,7 +19,7 @@ if not os.path.exists(HISTORY_DIR):
 if not os.path.exists(HISTORY_FILE):
     with open(HISTORY_FILE, "w") as f:
         json.dump([], f)  # Initialize with an empty list
-
+w
 
 def load_history():
     """
