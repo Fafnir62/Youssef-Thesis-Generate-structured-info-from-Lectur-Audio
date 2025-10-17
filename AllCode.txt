@@ -1,0 +1,793 @@
+----------------------------- chatCourse.py
+
+import os
+import json
+import streamlit as st
+from langchain_community.vectorstores import FAISS
+from langchain_community.embeddings import OpenAIEmbeddings
+from langchain_community.chat_models import ChatOpenAI
+from langchain.memory import ConversationBufferMemory
+from langchain.chains import ConversationalRetrievalChain
+import requests
+
+VECTORSTORE_PATH = "/home/fafnir/Alpha/_Python/Python Current/Youssef Thesis/vectorstore.faiss"
+EXPORT_PATH = "/home/fafnir/Alpha/_Python/Python Current/Youssef Thesis/Export Station"
+HISTORY_DIR = "/home/fafnir/Alpha/_Python/Python Current/Youssef Thesis/History"
+HISTORY_FILE = os.path.join(HISTORY_DIR, "askLectures.json")
+
+# Ensure the history directory and file exist
+if not os.path.exists(HISTORY_DIR):
+    os.makedirs(HISTORY_DIR)
+if not os.path.exists(HISTORY_FILE):
+    with open(HISTORY_FILE, "w") as f:
+        json.dump([], f)  # Initialize with an empty list
+w
+
+def load_history():
+    """
+    Load chat history from the JSON file. If the file is empty, return an empty list.
+    """
+    try:
+        with open(HISTORY_FILE, "r") as f:
+            content = f.read().strip()
+            if not content:
+                return []
+            return json.loads(content)
+    except json.JSONDecodeError:
+        return []
+
+
+def save_to_history(question, answer):
+    """
+    Save a question-answer pair to the JSON file.
+    """
+    history = load_history()
+    history.append({"question": question, "answer": answer})
+    with open(HISTORY_FILE, "w") as f:
+        json.dump(history, f, indent=2)
+
+
+def generate_embeddings(transcript_path):
+    """
+    Generate embeddings for the given transcript and save them to FAISS.
+    """
+    with open(transcript_path, "r") as f:
+        transcript = f.read()
+
+    # Generate embeddings and overwrite FAISS
+    embeddings = OpenAIEmbeddings()
+    vectorstore = FAISS.from_texts([transcript], embeddings)
+    vectorstore.save_local(VECTORSTORE_PATH)
+    return vectorstore
+
+
+def get_conversation_chain():
+    """
+    Create a conversational retrieval chain using LangChain.
+    Ensure embeddings are regenerated for every new session.
+    """
+    transcript_path = os.path.join(EXPORT_PATH, "transcript.txt")
+    if not os.path.exists(transcript_path):
+        st.error("Transcript not found. Please generate the transcript first.")
+        return None
+
+    st.info("Generating embeddings for the transcript...")
+    try:
+        vectorstore = generate_embeddings(transcript_path)
+        st.success("Embeddings generated successfully!")
+    except Exception as e:
+        st.error(f"Failed to generate embeddings: {e}")
+        return None
+
+    llm = ChatOpenAI(temperature=0)
+    memory = ConversationBufferMemory(memory_key='chat_history', return_messages=True)
+    return ConversationalRetrievalChain.from_llm(
+        llm=llm,
+        retriever=vectorstore.as_retriever(),
+        memory=memory
+    )
+
+
+def fetch_additional_info(answer):
+    """
+    Fetch more information about the provided answer from the internet using SERP API.
+    """
+    SERP_API_KEY = os.getenv("SERP_API_KEY")
+    SERP_API_URL = "https://serpapi.com/search"
+
+    if not SERP_API_KEY:
+        return "SERP API key not set. Please configure it in the environment variables."
+
+    params = {
+        "q": answer,
+        "api_key": SERP_API_KEY,
+        "engine": "google"
+    }
+
+    try:
+        response = requests.get(SERP_API_URL, params=params)
+        response.raise_for_status()
+        search_results = response.json()
+
+        additional_info = []
+        for result in search_results.get("organic_results", []):
+            additional_info.append({
+                "title": result.get("title", "No title"),
+                "link": result.get("link", "No link"),
+                "snippet": result.get("snippet", "No description")
+            })
+
+        return additional_info
+    except Exception as e:
+        return f"Error fetching additional info: {e}"
+
+
+def display_additional_info(info):
+    """
+    Display additional information fetched from the internet.
+    """
+    if isinstance(info, str):  # Error message or no results
+        st.error(info)
+    elif info:
+        st.markdown("### More Information from Internet")
+        for item in info:
+            st.markdown(f"**[{item['title']}]({item['link']})**")
+            st.markdown(f"{item['snippet']}")
+            st.markdown("---")
+    else:
+        st.write("No additional information found.")
+
+
+def app():
+    """
+    Streamlit app to chat with the course and save the history.
+    """
+    st.title("💬 Chat with Course")
+    st.info("Chat with the transcript and get answers to your questions.")
+
+    # Initialize conversation chain
+    conversation_chain = get_conversation_chain()
+    if conversation_chain is None:
+        return
+
+    # Input for user question
+    user_question = st.text_input("Ask your question about the lectures:")
+
+    if user_question:
+        try:
+            # Generate answer using embeddings
+            answer = conversation_chain.run(user_question)
+
+            # Display the interaction
+            st.markdown(f"**You:** {user_question}")
+            st.markdown(f"**Lecture:** {answer}")
+            st.markdown("---")
+
+            # Save the interaction to history
+            save_to_history(user_question, answer)
+
+            # Add the "More Info from Internet" button only if the answer exists
+            if answer:
+                if st.button(f"More Info for: {user_question}", key=f"more_info_{user_question}"):
+                    additional_info = fetch_additional_info(answer)
+                    display_additional_info(additional_info)
+        except Exception as e:
+            st.error(f"Error generating answer: {e}")
+
+    # Display chat history under the input box
+    history = load_history()
+    if history:
+        st.markdown("### Chat History")
+        for interaction in reversed(history):
+            st.markdown(f"**You:** {interaction['question']}")
+            st.markdown(f"**Lecture:** {interaction['answer']}")
+            st.markdown("---")
+
+----------------------------- chatCourseOff.py
+
+import os
+import json
+import streamlit as st
+
+from langchain_community.vectorstores import FAISS
+from langchain.memory import ConversationBufferMemory
+from langchain.chains import ConversationalRetrievalChain
+
+from sentence_transformers import SentenceTransformer
+from transformers import AutoTokenizer, AutoModelForSeq2SeqLM, pipeline
+from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain_community.llms import HuggingFacePipeline
+
+VECTORSTORE_PATH = "/home/fafnir/Alpha/_Python/Python Current/Youssef Thesis/vectorstore_offline.faiss"
+EXPORT_PATH = "/home/fafnir/Alpha/_Python/Python Current/Youssef Thesis/Export Station"
+HISTORY_DIR = "/home/fafnir/Alpha/_Python/Python Current/Youssef Thesis/History"
+HISTORY_FILE = os.path.join(HISTORY_DIR, "askLecturesOffline.json")
+
+os.makedirs(HISTORY_DIR, exist_ok=True)
+if not os.path.exists(HISTORY_FILE):
+    with open(HISTORY_FILE, "w") as f:
+        json.dump([], f)
+
+def load_history():
+    try:
+        with open(HISTORY_FILE, "r") as f:
+            content = f.read().strip()
+            if not content:
+                return []
+            return json.loads(content)
+    except json.JSONDecodeError:
+        return []
+
+def save_to_history(question, answer):
+    history = load_history()
+    history.append({"question": question, "answer": answer})
+    with open(HISTORY_FILE, "w") as f:
+        json.dump(history, f, indent=2)
+
+def generate_offline_embeddings(transcript_path):
+    with open(transcript_path, "r") as f:
+        transcript = f.read()
+
+    embed_model = SentenceTransformer('all-MiniLM-L6-v2')
+    embeddings = HuggingFaceEmbeddings(model_name='sentence-transformers/all-MiniLM-L6-v2')
+    vectorstore = FAISS.from_texts([transcript], embeddings)
+    vectorstore.save_local(VECTORSTORE_PATH)
+    return vectorstore
+
+def get_conversation_chain_offline():
+    transcript_path = os.path.join(EXPORT_PATH, "transcript.txt")
+    if not os.path.exists(transcript_path):
+        st.error("Transcript not found. Please generate the transcript first.")
+        return None
+
+    st.info("Generating offline embeddings...")
+    try:
+        vectorstore = generate_offline_embeddings(transcript_path)
+        st.success("Embeddings generated successfully!")
+    except Exception as e:
+        st.error(f"Failed to generate embeddings: {e}")
+        return None
+
+    # Load Flan-T5 for offline generation
+    tokenizer = AutoTokenizer.from_pretrained("google/flan-t5-base")
+    model = AutoModelForSeq2SeqLM.from_pretrained("google/flan-t5-base")
+    pipe = pipeline("text2text-generation", model=model, tokenizer=tokenizer, max_new_tokens=256)
+    llm = HuggingFacePipeline(pipeline=pipe)
+
+    memory = ConversationBufferMemory(memory_key='chat_history', return_messages=True)
+    return ConversationalRetrievalChain.from_llm(
+        llm=llm,
+        retriever=vectorstore.as_retriever(),
+        memory=memory
+    )
+
+def app():
+    st.title("💬 Offline Chat with Course")
+    st.info("Chat with the transcript using fully offline models (no internet).")
+
+    conversation_chain = get_conversation_chain_offline()
+    if conversation_chain is None:
+        return
+
+    user_question = st.text_input("Ask your question about the lectures:")
+
+    if user_question:
+        try:
+            answer = conversation_chain.run(user_question)
+            st.markdown(f"**You:** {user_question}")
+            st.markdown(f"**Lecture:** {answer}")
+            st.markdown("---")
+            save_to_history(user_question, answer)
+        except Exception as e:
+            st.error(f"Error generating answer: {e}")
+
+    history = load_history()
+    if history:
+        st.markdown("### Chat History")
+        for interaction in reversed(history):
+            st.markdown(f"**You:** {interaction['question']}")
+            st.markdown(f"**Lecture:** {interaction['answer']}")
+            st.markdown("---")
+
+----------------------------- generateTranscript.py
+
+import os
+import whisper
+
+# Define the export path for saving the transcript
+EXPORT_PATH = "/home/fafnir/Alpha/_Python/Python Current/Youssef Thesis/Export Station"
+
+def transcribe_audio(file_path):
+
+    try:
+        # Check if the Whisper library is properly installed
+        if not hasattr(whisper, "load_model"):
+            raise AttributeError("The Whisper library does not have 'load_model'. Ensure openai-whisper is installed.")
+
+        # Load the Whisper model
+        print("Loading Whisper model...")
+        model = whisper.load_model("base")
+        print("Transcribing audio...")
+
+        # Perform the transcription
+        result = model.transcribe(file_path)
+        transcript = result["text"]
+
+        # Ensure the export directory exists
+        if not os.path.exists(EXPORT_PATH):
+            os.makedirs(EXPORT_PATH)
+
+        # Save the transcript as a text file
+        transcript_path = os.path.join(EXPORT_PATH, "transcript.txt")
+        with open(transcript_path, "w") as f:
+            f.write(transcript)
+
+        print(f"Transcript saved to {transcript_path}")
+        return transcript_path, transcript
+
+    except AttributeError as e:
+        print(f"Error: {e}")
+        print("Please ensure the correct version of Whisper is installed using 'pip install -U openai-whisper'.")
+        return None, None
+    except Exception as e:
+        print(f"Error during transcription: {e}")
+        return None, None
+
+----------------------------- main.py
+
+import streamlit as st
+from streamlit_option_menu import option_menu
+import os
+import shutil
+
+from generateTranscript import transcribe_audio
+from structuredInfo import process_transcript
+from relatedArticles import get_related_articles
+from chatCourse import app as chat_course_app
+from structuredInfoOff import process_transcript_offline
+from chatCourseOff import app as chat_course_off_app
+
+EXPORT_PATH = "/home/fafnir/Alpha/_Python/Python Current/Youssef Thesis/Export Station"
+
+class MultiApp:
+
+    def __init__(self):
+        self.apps = []
+
+    def add_app(self, title, func, icon):
+        self.apps.append({
+            "title": title,
+            "function": func,
+            "icon": icon
+        })
+
+    def run(self):
+        with st.sidebar:
+            selected_app = option_menu(
+                menu_title="Lecture Tools",
+                options=[app["title"] for app in self.apps],
+                icons=[app["icon"] for app in self.apps],
+                menu_icon="book",
+                default_index=0,
+                styles={
+                    "container": {"padding": "5!important", "background-color": "#f0f2f6"},
+                    "icon": {"color": "#0099ff", "font-size": "23px"},
+                    "nav-link": {"font-size": "18px", "text-align": "left", "--hover-color": "#e8efff"},
+                    "nav-link-selected": {"background-color": "#003d99", "color": "white"},
+                }
+            )
+
+        for app in self.apps:
+            if app["title"] == selected_app:
+                app["function"]()
+
+
+# === Online Tabs ===
+
+def transcript_page():
+    st.title("🎤 Transcribe MP3 Lecture")
+    st.info("Upload an MP3 file and generate its transcript.")
+
+    uploaded_file = st.file_uploader("Upload MP3 Lecture", type=["mp3"])
+
+    if uploaded_file:
+        file_path = os.path.join(EXPORT_PATH, uploaded_file.name)
+        with open(file_path, "wb") as f:
+            f.write(uploaded_file.read())
+        st.success(f"File uploaded: {file_path}")
+
+        if st.button("Generate Transcript"):
+            transcript_path, transcript = transcribe_audio(file_path)
+            if transcript:
+                st.success(f"Transcript generated successfully! File saved at: {transcript_path}")
+                st.text_area("Transcript", transcript, height=300)
+            else:
+                st.error("Failed to generate transcript.")
+
+    if st.button("Reset"):
+        if os.path.exists(EXPORT_PATH):
+            shutil.rmtree(EXPORT_PATH)
+            os.makedirs(EXPORT_PATH)
+        st.success("All files in Export Station have been deleted.")
+
+
+def structured_info_page():
+    st.title("🗂️ Structured Information")
+    st.info("Organize lecture transcript into structured sections with titles, summaries, and key points.")
+
+    if st.button("Generate Structured Information"):
+        structured_data = process_transcript()
+        if structured_data:
+            st.success("Structured information generated successfully!")
+            for idx, section in enumerate(structured_data):
+                st.markdown(f"### {section['title']}")
+                st.markdown(f"{section['summary']}")
+                if "key_points" in section:
+                    st.markdown("## **Key Points:**")
+                    st.markdown(f"{section['key_points']}")
+        else:
+            st.error("Failed to generate structured information. Ensure a transcript is available.")
+
+
+def related_articles_page():
+    st.title("🔗 Related Articles")
+    st.info("Find articles related to the topics discussed in the transcript.")
+
+    if st.button("Find Related Articles"):
+        articles = get_related_articles()
+        if articles:
+            st.success("Related articles retrieved successfully!")
+            for article in articles:
+                st.markdown(f"### [{article['title']}]({article['link']})")
+                st.markdown(f"{article['description']}")
+        else:
+            st.error("No articles found. Ensure a transcript is available and try again.")
+
+
+def chat_course_page():
+    st.title("💬 Chat with Course")
+    st.info("Chat with the transcript and get answers to your questions. Explore detailed explanations.")
+
+    chat_course_app()
+
+
+# === Offline Tabs ===
+
+def structured_info_offline_page():
+    st.title("🗂️ Offline Structured Information")
+    st.info("Organize the lecture transcript into structured sections completely offline.")
+
+    if st.button("Generate Offline Structured Information"):
+        structured_data = process_transcript_offline()
+        if structured_data:
+            st.success("Offline structured information generated successfully!")
+            for idx, section in enumerate(structured_data):
+                st.markdown(f"### {section['title']}")
+                st.markdown(f"{section['summary']}")
+                if "key_points" in section:
+                    st.markdown("## **Key Points:**")
+                    st.markdown(f"{section['key_points']}")
+        else:
+            st.error("Failed to generate offline structured information. Ensure a transcript is available.")
+
+
+def chat_course_offline_page():
+    st.title("💬 Offline Chat with Course")
+    st.info("Chat with the transcript completely offline, using local models with no internet required.")
+
+    chat_course_off_app()
+
+
+# === App Runner ===
+
+if __name__ == "__main__":
+    st.info("Initializing the application... Please wait.")
+    app = MultiApp()
+    app.add_app("🎤 Transcribe Lecture", transcript_page, "microphone")
+    app.add_app("Structured Information", structured_info_page, "file-text")
+    app.add_app("Related Articles", related_articles_page, "link")
+    app.add_app("Chat with Course", chat_course_page, "chat")
+    app.add_app("Offline Structured Info", structured_info_offline_page, "file-text")
+    app.add_app("Offline Chat", chat_course_offline_page, "chat")
+    app.run()
+
+----------------------------- relatedArticles.py
+
+import os
+import requests
+from dotenv import load_dotenv
+from langchain.prompts import PromptTemplate
+from langchain.chains import LLMChain
+from langchain_community.llms import OpenAI
+
+# Load environment variables
+load_dotenv()
+
+EXPORT_PATH = "/home/fafnir/Alpha/_Python/Python Current/Youssef Thesis/Export Station"
+SERP_API_KEY = os.getenv("SERP_API_KEY")
+SERP_API_URL = "https://serpapi.com/search"
+
+
+def extract_academic_keywords(transcript, num_keywords=7):
+    """
+    Extract academic keywords from the transcript in chunks to avoid exceeding token limits.
+    """
+    openai_api_key = os.getenv("OPENAI_API_KEY")
+    if not openai_api_key:
+        raise ValueError("OPENAI_API_KEY is not set in the .env file.")
+
+    # Initialize the OpenAI model
+    llm = OpenAI(openai_api_key=openai_api_key, temperature=0)
+
+    # Define the prompt template
+    prompt_template = PromptTemplate(
+        template=(
+            "Extract {num_keywords} academic and research-oriented keywords from this text:\n\n{text}\n\n"
+            "Keywords:"
+        )
+    )
+    chain = LLMChain(llm=llm, prompt=prompt_template)
+
+    # Chunk the transcript into smaller parts if too long
+    max_chunk_size = 1000  # Approximate size for safe token count
+    chunks = [transcript[i:i + max_chunk_size] for i in range(0, len(transcript), max_chunk_size)]
+
+    keywords = set()
+    for chunk in chunks:
+        try:
+            chunk_keywords = chain.run({"text": chunk, "num_keywords": num_keywords}).strip()
+            keywords.update(chunk_keywords.split(", "))
+        except Exception as e:
+            print(f"Error during keyword extraction for a chunk: {e}")
+
+    return list(keywords)[:num_keywords]  # Return top `num_keywords`
+
+
+def retrieve_articles_online(query, num_results=5):
+    """
+    Retrieve related articles using the SERP API based on a search query in Google Scholar.
+    """
+    if not SERP_API_KEY:
+        raise ValueError("SERP_API_KEY is not set in the .env file.")
+
+    params = {
+        "q": query,
+        "api_key": SERP_API_KEY,
+        "num": num_results,
+        "engine": "google_scholar",
+    }
+
+    response = requests.get(SERP_API_URL, params=params)
+    response.raise_for_status()
+    search_results = response.json()
+
+    articles = []
+    for result in search_results.get("organic_results", []):
+        articles.append({
+            "title": result.get("title"),
+            "link": result.get("link"),
+            "description": result.get("snippet", "No description available."),
+        })
+
+    return articles
+
+
+def get_related_articles():
+    """
+    Process the transcript, extract academic keywords, and retrieve related articles.
+    """
+    try:
+        transcript_path = os.path.join(EXPORT_PATH, "transcript.txt")
+        if not os.path.exists(transcript_path):
+            raise FileNotFoundError("Transcript file not found. Please generate the transcript first.")
+
+        with open(transcript_path, "r") as f:
+            transcript = f.read()
+
+        # Extract academic keywords
+        keywords = extract_academic_keywords(transcript)
+        print(f"Generated Academic Keywords: {keywords}")
+
+        # Join keywords for the search query
+        query = ", ".join(keywords)
+        print(f"Query Sent for Article Retrieval: {query}")
+
+        # Retrieve articles online using the keywords
+        articles = retrieve_articles_online(query)
+        return articles
+
+    except FileNotFoundError as e:
+        print(f"Error: {e}")
+        return []
+    except Exception as e:
+        print(f"Error during article retrieval: {e}")
+        return []
+
+----------------------------- structuredInfo.py
+
+import os
+import random
+from langchain.prompts import PromptTemplate
+from langchain.chains import LLMChain
+from langchain_openai import OpenAI
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
+
+EXPORT_PATH = "/home/fafnir/Alpha/_Python/Python Current/Youssef Thesis/Export Station"
+
+def process_transcript():
+    """
+    Load the transcript from the Export Station and process it using LangChain.
+    Each chunk gets a title and a summary, and key points are added at random intervals.
+
+    Returns:
+        list: A list of dictionaries containing structured sections.
+    """
+    try:
+        # Load the OpenAI API key from the environment
+        openai_api_key = os.getenv("OPENAI_API_KEY")
+        if not openai_api_key:
+            raise ValueError("OpenAI API key not found. Please set it in the .env file.")
+
+        # Check if the transcript exists in Export Station
+        transcript_path = os.path.join(EXPORT_PATH, "transcript.txt")
+        if not os.path.exists(transcript_path):
+            raise FileNotFoundError(f"Transcript file not found in {EXPORT_PATH}. Please generate it first.")
+
+        # Read the transcript
+        with open(transcript_path, "r") as f:
+            transcript = f.read()
+
+        # Initialize LangChain components
+        llm = OpenAI(openai_api_key=openai_api_key, temperature=0)
+        splitter = RecursiveCharacterTextSplitter(chunk_size=2000, chunk_overlap=200)
+
+        # Prompt templates
+        title_prompt = PromptTemplate(template="Provide a concise title for the following text:\n\n{text}\n")
+        summary_prompt = PromptTemplate(template="Summarize the following text:\n\n{text}\n")
+        key_points_prompt = PromptTemplate(template="Extract key points from the following text:\n\n{text}\n")
+
+        title_chain = LLMChain(llm=llm, prompt=title_prompt)
+        summary_chain = LLMChain(llm=llm, prompt=summary_prompt)
+        key_points_chain = LLMChain(llm=llm, prompt=key_points_prompt)
+
+        # Split and process transcript
+        chunks = splitter.split_text(transcript)
+        structured_data = []
+
+        # Initialize random interval for key points
+        key_points_interval = random.randint(1, 5)
+        next_key_points_chunk = key_points_interval
+
+        for idx, chunk in enumerate(chunks):
+            print(f"Processing chunk {idx + 1}/{len(chunks)}...")
+
+            title = title_chain.run({"text": chunk}).strip()
+            summary = summary_chain.run({"text": chunk}).strip()
+
+            section = {
+                "title": title,
+                "summary": summary,
+            }
+
+            # Add key points at random intervals
+            if idx + 1 == next_key_points_chunk:
+                key_points = key_points_chain.run({"text": chunk}).strip()
+                section["key_points"] = key_points
+
+                # Set the next interval
+                key_points_interval = random.randint(1, 5)
+                next_key_points_chunk = idx + 1 + key_points_interval
+
+            structured_data.append(section)
+
+        return structured_data
+
+    except FileNotFoundError as e:
+        print(f"Error: {e}")
+        return None
+    except Exception as e:
+        print(f"Error during structuring: {e}")
+        return None
+
+----------------------------- structuredInfoOff.py
+
+import os
+import re
+from dotenv import load_dotenv
+from transformers import AutoTokenizer, AutoModelForSeq2SeqLM, pipeline
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+
+# Load .env (for consistent config even if unused here)
+load_dotenv()
+
+EXPORT_PATH = "/home/fafnir/Alpha/_Python/Python Current/Youssef Thesis/Export Station"
+
+# Load the local model once
+model_name = "google/flan-t5-base"
+tokenizer = AutoTokenizer.from_pretrained(model_name)
+model = AutoModelForSeq2SeqLM.from_pretrained(model_name)
+generator = pipeline("text2text-generation", model=model, tokenizer=tokenizer, max_new_tokens=256)
+
+def clean_text(text):
+    """Remove redundant whitespace, repeated words, or filler."""
+    text = re.sub(r'\s+', ' ', text)
+    text = re.sub(r'(Cloud computing\s*){2,}', 'Cloud computing ', text)
+    return text.strip()
+
+def generate_offline(prompt):
+    """Call the offline model with a given prompt and return cleaned text."""
+    result = generator(prompt)
+    return clean_text(result[0]['generated_text'])
+
+def process_transcript_offline():
+    try:
+        transcript_path = os.path.join(EXPORT_PATH, "transcript.txt")
+        if not os.path.exists(transcript_path):
+            raise FileNotFoundError(f"Transcript not found in {EXPORT_PATH}")
+
+        with open(transcript_path, "r") as f:
+            transcript = f.read()
+
+        # Split into smaller, overlapping chunks for better offline summarization
+        splitter = RecursiveCharacterTextSplitter(chunk_size=512, chunk_overlap=100)
+        chunks = splitter.split_text(transcript)
+
+        if not chunks:
+            print("No usable chunks found.")
+            return None
+
+        structured_data = []
+        seen_sections = set()
+
+        for idx, chunk in enumerate(chunks):
+            # Skip empty or very short chunks
+            if len(chunk.strip().split()) < 20:
+                continue
+
+            print(f"[Offline] Processing chunk {idx + 1}/{len(chunks)}...")
+
+            # Stronger, more directive prompts
+            title_prompt = (
+                "Write a clear, academic-style TITLE (max 10 words) for this lecture text:\n\n"
+                f"{chunk}\n\nTITLE:"
+            )
+            summary_prompt = (
+                "Write a CONCISE summary (2-3 sentences, avoid repeating phrases):\n\n"
+                f"{chunk}\n\nSUMMARY:"
+            )
+            key_points_prompt = (
+                "List 3-5 clear bullet-point KEY POINTS (short phrases):\n\n"
+                f"{chunk}\n\nKEY POINTS:"
+            )
+
+            title = generate_offline(title_prompt)
+            summary = generate_offline(summary_prompt)
+            key_points = generate_offline(key_points_prompt)
+
+            # Deduplicate sections
+            unique_signature = (title.lower(), summary.lower())
+            if unique_signature in seen_sections:
+                continue
+            seen_sections.add(unique_signature)
+
+            # Append structured section
+            section = {
+                "title": title,
+                "summary": summary,
+                "key_points": key_points
+            }
+            structured_data.append(section)
+
+        if not structured_data:
+            print("Structured info generation resulted in no usable sections.")
+            return None
+
+        return structured_data
+
+    except Exception as e:
+        print(f"Error (offline structuring): {e}")
+        return None
